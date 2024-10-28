@@ -27,9 +27,20 @@ def clean_txt(txt):
     cleaned_txt = []
     for line in txt:
         line = line.lower()
-        line = re.sub(r"[,.\"\'!@#$%^&*(){}?/;`~:<>+=-\\]", "", line)
+        line = re.sub(r"[\"\'@#$%^&*(){}/`~:<>+=\\]", "", line)
+        line = re.sub(r'([,!?;.]+)', r' \1', line)
         cleaned_txt.append(line)
     return cleaned_txt
+
+def process_line(line, span, tokens_list):
+    # Split line into tokenized words
+    tokens = line.split(" ")
+            
+    tokens = [" ".join(tokens[i:i+span]) for i in range(0, len(tokens), span)]
+    for t in tokens:
+        tokens_list.append(t)
+
+    return tokens_list
 
 # Steps to get the chain are:
 # 1. Count all unique instances (N) of a word in the training data
@@ -38,18 +49,25 @@ def clean_txt(txt):
 
 def main():
     parser = argparse.ArgumentParser(prog='MKText-Predictor', description="Predicts text based on a training file")
-    parser.add_argument('-t', '-training', type=str, help='Training text file')
-    parser.add_argument('-s', '-span', type=int, help='Max span of tokens. Higher span may reduce chain accuracy for shorter texts.')
+    parser.add_argument('-t', '-training', type=str, help='Path to a training text file. Defaults to the default.txt in the repo directory.')
+    parser.add_argument('-s', '-span', type=int, help='The max number of words to group together into a token. Higher span may reduce chain accuracy for shorter texts, but allows for more complex output.')
+    parser.add_argument('-l', '-length', type=int, help='Length of the output text')
+    parser.add_argument('-p', '-prompt', type=str, help='Prompt to generate text from')
     args = parser.parse_args()
     
     text = os.path.abspath("default.txt")
-    
     span = 2
+    length = 50
+    prompt = ""
 
     if args.t:
         text = os.path.abspath(args.t)
     if args.s:
         span = args.s
+    if args.l:
+        length = args.l
+    if args.p:
+        prompt = args.p
 
     # Open File
     if not os.path.isfile(text):
@@ -65,20 +83,15 @@ def main():
     word_dict = dict()
     tokens_list = list()
 
-    # TODO Allow specifying groups of words as states, to allow contextualization
+    tokens_list = process_line(prompt, span, tokens_list)
 
     print("Reading file...")
     with open(text, 'r') as file:
         for line in file:
-            # Split line into tokenized words
-            tokens = line.split(" ")
-            
-            tokens = [" ".join(tokens[i:i+span]) for i in range(0, len(tokens), span)]
-            for t in tokens:
-                tokens_list.append(t)
+            tokens_list = process_line(line, span, tokens_list)
 
     tokens_list = clean_txt(tokens_list)
-    print("File read! Word count: ", len(tokens_list))
+    print("File read! Token count: ", len(tokens_list))
 
     print("Adding to dictionary...")
     current_id = 0
@@ -92,7 +105,7 @@ def main():
             current_id = current_id + 1
 
     word_count = len(word_dict)
-    print("Dictionary Set! Word count: ", word_count)
+    print("Dictionary Set! Unique token count: ", word_count)
 
     # Create NxN matrix
     print("Creating transition state matrix...")
@@ -140,11 +153,21 @@ def main():
 
     # Generate text by starting with first dict word.
     print("Generating text...")
-    gen_text = list(word_dict)[0] + " "
+
+    gen_text = ""
+    last_token = list(word_dict)[0]
+    if prompt != "":
+        gen_text = prompt + " "
+
+        prompt_tokens = prompt.split(" ")
+        prompt_tokens = [" ".join(prompt_tokens[i:i+span]) for i in range(0, len(prompt_tokens), span)]
+        last_token = prompt_tokens[-1]
+
+    else:
+        gen_text = list(word_dict)[0] + " "
 
     # For 50 iterations find probable next word
-    last_token = list(word_dict)[0]
-    for it in range(0, 100):
+    for it in range(0, length):
         # Get column of transition probabilites
         trans = transition_mat[word_dict[last_token][0]]
 
@@ -157,11 +180,16 @@ def main():
                 gen_text = gen_text + next_token + " "
                 last_token = next_token
                 break
+
+    gen_text = gen_text.replace(' .', '.')
+    gen_text = gen_text.replace(' ;', ';')
+    gen_text = gen_text.replace(' ?', '?')
+    gen_text = gen_text.replace(' !', '!')
+    gen_text = gen_text.replace(' ,', ',')
     
     print("Text generated!")
     print("")
     print("")
-
     print(gen_text)
     
 
