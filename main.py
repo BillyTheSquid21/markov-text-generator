@@ -2,7 +2,7 @@ import os
 import random
 import re
 import nltk
-from nltk.tokenize import word_tokenize
+from multiprocessing.pool import ThreadPool
 import numpy as np
 import argparse
 
@@ -28,9 +28,7 @@ def clean_txt(txt):
     for line in txt:
         line = line.lower()
         line = re.sub(r"[,.\"\'!@#$%^&*(){}?/;`~:<>+=-\\]", "", line)
-        tokens = word_tokenize(line)
-        words = [word for word in tokens if word.isalpha()]
-        cleaned_txt+=words
+        cleaned_txt.append(line)
     return cleaned_txt
 
 # Steps to get the chain are:
@@ -41,12 +39,17 @@ def clean_txt(txt):
 def main():
     parser = argparse.ArgumentParser(prog='MKText-Predictor', description="Predicts text based on a training file")
     parser.add_argument('-t', '-training', type=str, help='Training text file')
+    parser.add_argument('-s', '-span', type=int, help='Max span of tokens. Higher span may reduce chain accuracy for shorter texts.')
     args = parser.parse_args()
     
     text = os.path.abspath("default.txt")
+    
+    span = 2
 
     if args.t:
         text = os.path.abspath(args.t)
+    if args.s:
+        span = args.s
 
     # Open File
     if not os.path.isfile(text):
@@ -69,7 +72,8 @@ def main():
         for line in file:
             # Split line into tokenized words
             tokens = line.split(" ")
-
+            
+            tokens = [" ".join(tokens[i:i+span]) for i in range(0, len(tokens), span)]
             for t in tokens:
                 tokens_list.append(t)
 
@@ -115,8 +119,11 @@ def main():
 
         # Update prev id
         prev_token = t
+        
+    print("Text Walked!")
 
     # Divide probabilities by transition words count
+    print("Calculating transition properties...")
     for i in range(0, word_count):
         for j in range(0, word_count):
             transition_count = len(word_dict[list(word_dict)[i]][2])
@@ -126,7 +133,10 @@ def main():
                 transition_mat[i][j] = transition_mat[i][j] / transition_count
 
         transition_mat[i] = probability_to_ranges(transition_mat[i])
-    print("Text walk complete!")
+        pc_done = (i / word_count) * 100
+        print("Status: ", pc_done, "%")
+        
+    print("Transition properties calculated!")
 
     # Generate text by starting with first dict word.
     print("Generating text...")
@@ -134,7 +144,7 @@ def main():
 
     # For 50 iterations find probable next word
     last_token = list(word_dict)[0]
-    for it in range(0, 50):
+    for it in range(0, 100):
         # Get column of transition probabilites
         trans = transition_mat[word_dict[last_token][0]]
 
