@@ -12,7 +12,7 @@ def clean_txt(txt):
     cleaned_txt = []
     for line in txt:
         line = line.lower()
-        line = re.sub(r"[\"\'@#$%^&*(){}/`~:<>+=\\]", "", line)
+        line = re.sub(r"[\"@#$%^&*(){}/`~:<>+=\\]", "", line)
         line = re.sub(r'([,!?;.]+)', r' \1', line)
         cleaned_txt.append(line)
     return cleaned_txt
@@ -171,7 +171,7 @@ def main():
     else:
         gen_text = list(word_dict)[0] + " "
 
-    # For 50 iterations find probable next word
+    # For length iterations find probable next word
     for it in range(0, length):
         # Get column of transition probabilites
         trans = transition_mat[word_dict[last_token][0]]
@@ -186,6 +186,7 @@ def main():
                 last_token = next_token
                 break
 
+    # Adds the punctuation tokens back to the ends of words
     gen_text = gen_text.replace(' .', '.')
     gen_text = gen_text.replace(' ;', ';')
     gen_text = gen_text.replace(' ?', '?')
