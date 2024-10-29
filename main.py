@@ -3,7 +3,7 @@ import random
 import re
 import nltk
 import time
-from multiprocessing.pool import ThreadPool
+from concurrent.futures import ProcessPoolExecutor
 from TransitionVector import TransitionVector
 import numpy as np
 import argparse
@@ -42,7 +42,8 @@ def main():
     parser.add_argument('-s', '-span', type=int, help='The max number of words to group together into a token. Higher span may reduce chain accuracy for shorter texts, but allows for more complex output.')
     parser.add_argument('-l', '-length', type=int, help='Length of the output text')
     parser.add_argument('-p', '-prompt', type=str, help='Prompt to generate text from')
-    parser.add_argument('-c', '-count', type=int, help='Max number of files to read in a folder. Defaults to 16')
+    parser.add_argument('-n', '-number', type=int, help='Max number of files to read in a folder. Defaults to 16')
+    parser.add_argument('-c', '-cores', type=int, help='Max number of cores to use. Defaults to 4')
     args = parser.parse_args()
     
     path = os.path.abspath("default.txt")
@@ -61,8 +62,10 @@ def main():
         length = args.l
     if args.p:
         prompt = args.p
-    if args.c:
+    if args.n:
         max_file_count = args.c
+    if args.c:
+        thread_count = args.c
 
     # Open File
     file_count = 0
@@ -134,7 +137,7 @@ def main():
 
     # Divide probabilities by transition words count
     # This is the most expensive operation currently so thread
-    pool = ThreadPool(thread_count)
+    pool = ProcessPoolExecutor(thread_count)
 
     print("Calculating transition properties (this may take a while!)")
     start = time.time()
@@ -144,13 +147,12 @@ def main():
 
     # Results should be in ID order
     i = 0
-    result = pool.map_async(process_transition, trans_list, chunksize=16)
-    for res in result.get():
+    result = pool.map(process_transition, trans_list, chunksize=16)
+    for res in result:
         transition_mat[i] = res
         i = i + 1
         
     print("Transition properties calculated!")
-    pool.close()
 
     print("Elapsed time: ", (time.time() - start), "s")
 

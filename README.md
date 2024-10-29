@@ -29,6 +29,8 @@ Invoke the script by running `python main.py [-args]`. Valid arguments are provi
       -s S, -span S      The max number of words to group together into a token. Higher span may reduce chain accuracy for shorter texts, but allows for more complex output.
       -l L, -length L    Length of the output text
       -p P, -prompt P    Prompt to generate text from
+      -n N, -number N    Max number of files to read in a folder. Defaults to 16
+      -c C, -cores C     Max number of cores to use. Defaults to 4
 An example usage would be:
 
     python .\main.py -t "default_long.txt" -s 2 -l 300 -p "There was a dark and frightening sun"
