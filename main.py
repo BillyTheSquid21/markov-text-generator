@@ -2,26 +2,11 @@ import os
 import random
 import re
 import nltk
+import time
 from multiprocessing.pool import ThreadPool
+from TransitionVector import TransitionVector
 import numpy as np
 import argparse
-
-def probability_to_ranges(prob_vector):
-    
-    range_vector = np.zeros(len(prob_vector))
-    
-    # Track cumulative probability
-    # All non-zero values cover a number range (iterate with if p <= P)
-    # Zero values are converted to -1 so are never picked
-    cumulative_prob = 0.0
-    for i in range(0, len(prob_vector)):
-        if prob_vector[i] == 0:
-            range_vector[i] = -1.0
-        else:
-            range_vector[i] = prob_vector[i] + cumulative_prob
-            cumulative_prob = cumulative_prob + prob_vector[i]
-
-    return range_vector
 
 def clean_txt(txt):
     cleaned_txt = []
@@ -42,6 +27,10 @@ def process_line(line, span, tokens_list):
 
     return tokens_list
 
+def process_transition(trans_vec):
+    trans_vec.calculate_transition()
+    return trans_vec.probabilities()
+
 # Steps to get the chain are:
 # 1. Count all unique instances (N) of a word in the training data
 # 2. Create a matrix for transition properties (NxN)
@@ -49,32 +38,45 @@ def process_line(line, span, tokens_list):
 
 def main():
     parser = argparse.ArgumentParser(prog='MKText-Predictor', description="Predicts text based on a training file")
-    parser.add_argument('-t', '-training', type=str, help='Path to a training text file. Defaults to the default.txt in the repo directory.')
+    parser.add_argument('-t', '-training', type=str, help='Path to a training text file or folder. Defaults to the default.txt in the repo directory.')
     parser.add_argument('-s', '-span', type=int, help='The max number of words to group together into a token. Higher span may reduce chain accuracy for shorter texts, but allows for more complex output.')
     parser.add_argument('-l', '-length', type=int, help='Length of the output text')
     parser.add_argument('-p', '-prompt', type=str, help='Prompt to generate text from')
+    parser.add_argument('-c', '-count', type=int, help='Max number of files to read in a folder. Defaults to 16')
     args = parser.parse_args()
     
-    text = os.path.abspath("default.txt")
+    path = os.path.abspath("default.txt")
+    text = list()
     span = 2
     length = 50
     prompt = ""
+    max_file_count = 16
+    thread_count = 4
 
     if args.t:
-        text = os.path.abspath(args.t)
+        path = os.path.abspath(args.t)
     if args.s:
         span = args.s
     if args.l:
         length = args.l
     if args.p:
         prompt = args.p
+    if args.c:
+        max_file_count = args.c
 
     # Open File
-    if not os.path.isfile(text):
-        print("Training text does not exist: ", text)
-        return
+    file_count = 0
+    if os.path.isfile(path):
+        text.append(path)
+    elif os.path.isdir(path):
+        for file in os.listdir(path):
+            filename = os.fsdecode(file)
+            if filename.endswith(".txt") and file_count < max_file_count:
+                text.append(os.path.join(path, filename))
+                file_count = file_count + 1
     else:
-        print("Training text located: ", text)
+        print("Training file or folder not found!")
+        return
 
     # Download nltk resource
     nltk.download('punkt_tab')
@@ -86,9 +88,10 @@ def main():
     tokens_list = process_line(prompt, span, tokens_list)
 
     print("Reading file...")
-    with open(text, 'r') as file:
-        for line in file:
-            tokens_list = process_line(line, span, tokens_list)
+    for t in text:
+        with open(t, 'r', encoding="utf8") as file:
+            for line in file:
+                tokens_list = process_line(line, span, tokens_list)
 
     tokens_list = clean_txt(tokens_list)
     print("File read! Token count: ", len(tokens_list))
@@ -96,8 +99,6 @@ def main():
     print("Adding to dictionary...")
     current_id = 0
     for t in tokens_list:
-        pc_done = current_id / len(tokens_list) * 100.0
-        print("Status: ", pc_done, "%")
         if t in word_dict:
             word_dict[t][1] = word_dict[t][1] + 1 # incr count
         else:
@@ -115,11 +116,7 @@ def main():
     # Walk the text for probabilities
     print("Walking text...")
     prev_token = tokens_list[0]
-    index = 0
     for t in tokens_list[1:]:
-        pc_done = index / len(tokens_list) * 100.0
-        print("Status: ", pc_done, "%")
-        index = index + 1
 
         prev_token_id = word_dict[prev_token][0]
         curr_token_id = word_dict[t][0]
@@ -136,20 +133,26 @@ def main():
     print("Text Walked!")
 
     # Divide probabilities by transition words count
-    print("Calculating transition properties...")
-    for i in range(0, word_count):
-        for j in range(0, word_count):
-            transition_count = len(word_dict[list(word_dict)[i]][2])
-            if (transition_count == 0):
-                transition_mat[i][j] = 0
-            else:
-                transition_mat[i][j] = transition_mat[i][j] / transition_count
+    # This is the most expensive operation currently so thread
+    pool = ThreadPool(thread_count)
 
-        transition_mat[i] = probability_to_ranges(transition_mat[i])
-        pc_done = (i / word_count) * 100
-        print("Status: ", pc_done, "%")
+    print("Calculating transition properties (this may take a while!)")
+    start = time.time()
+    trans_list = list()
+    for i in range(0, word_count):
+        trans_list.append(TransitionVector(transition_mat, word_dict, i))
+
+    # Results should be in ID order
+    i = 0
+    result = pool.map_async(process_transition, trans_list, chunksize=16)
+    for res in result.get():
+        transition_mat[i] = res
+        i = i + 1
         
     print("Transition properties calculated!")
+    pool.close()
+
+    print("Elapsed time: ", (time.time() - start), "s")
 
     # Generate text by starting with first dict word.
     print("Generating text...")
